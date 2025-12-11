@@ -8,9 +8,11 @@ const FilterSchema = z.object({
   id: z.string(),
   label_value: z.string(),
   description: z.string(),
-  trigger_words: z.array(z.string()).min(1), // Keyword "sieve"
+  match_mode: z.enum(['keyword', 'embedding', 'any', 'all']).default('any'), // Control how Sieve works
+  trigger_words: z.array(z.string()).default([]), // Keyword "sieve"
   embeddings: z.object({
     enabled: z.boolean().default(false),
+    force_check: z.boolean().default(false), // Force embedding check even if keyword matches (for debug/logging)
     threshold: z.number().min(0).max(1).default(0.5),
     triggers: z.array(z.string()).default([]),
   }).optional(),

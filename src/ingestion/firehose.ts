@@ -38,25 +38,60 @@ export class FirehoseProcessor {
 
       // Iterate through all configured filters
       for (const filter of this.config.filters) {
-        let shouldProcess = false;
+        let keywordMatch = false;
+        let embeddingMatch = false;
+        let embeddingScore = 0;
         let triggerReason = "";
 
-        // 1a. Stage 1: Keyword Check (Fastest)
-        if (PreFilter.shouldScan(text, filter)) {
-          shouldProcess = true;
-          triggerReason = "Keyword Match";
+        // 1. Evaluate Keywords
+        if (filter.match_mode !== 'embedding') { // Skip if mode is strictly embedding
+            keywordMatch = PreFilter.shouldScan(text, filter);
         }
 
-        // 1b. Stage 1: Embedding Check (Slower but Semantic)
-        if (!shouldProcess && filter.embeddings?.enabled) {
-           const { isMatch, score } = await this.embeddingManager.checkSimilarity(text, filter);
-           if (isMatch) {
-             shouldProcess = true;
-             triggerReason = `Semantic Match (${score.toFixed(2)})`;
-           }
+        // 2. Evaluate Embeddings
+        // Run if:
+        // - Mode is 'embedding' OR 'all' (Always run)
+        // - Mode is 'any' AND (keyword didn't match OR force_check is on)
+        const shouldRunEmbedding = 
+            (filter.match_mode === 'embedding' || filter.match_mode === 'all') ||
+            (filter.match_mode === 'any' && filter.embeddings?.enabled && (!keywordMatch || filter.embeddings.force_check));
+
+        if (shouldRunEmbedding && filter.embeddings?.enabled) {
+            const result = await this.embeddingManager.checkSimilarity(text, filter);
+            embeddingMatch = result.isMatch;
+            embeddingScore = result.score;
+            
+            if (filter.embeddings.force_check && keywordMatch && !embeddingMatch) {
+                 console.log(`[DEBUG] ${filter.id}: Keyword matched, but semantic score low (${embeddingScore.toFixed(2)})`);
+            }
         }
 
-        if (!shouldProcess) {
+        // 3. Decide based on Match Mode
+        let passedSieve = false;
+
+        switch (filter.match_mode) {
+            case 'keyword':
+                passedSieve = keywordMatch;
+                if (passedSieve) triggerReason = "Keyword Match";
+                break;
+            case 'embedding':
+                passedSieve = embeddingMatch;
+                if (passedSieve) triggerReason = `Semantic Match (${embeddingScore.toFixed(2)})`;
+                break;
+            case 'all': // AND
+                passedSieve = keywordMatch && embeddingMatch;
+                if (passedSieve) triggerReason = `Keyword + Semantic Match (${embeddingScore.toFixed(2)})`;
+                break;
+            case 'any': // OR (Default)
+            default:
+                passedSieve = keywordMatch || embeddingMatch;
+                if (keywordMatch && embeddingMatch) triggerReason = `Keyword + Semantic Match (${embeddingScore.toFixed(2)})`;
+                else if (keywordMatch) triggerReason = "Keyword Match";
+                else if (embeddingMatch) triggerReason = `Semantic Match (${embeddingScore.toFixed(2)})`;
+                break;
+        }
+
+        if (!passedSieve) {
           continue;
         }
 
@@ -88,6 +123,8 @@ export class FirehoseProcessor {
             console.log(`   Text: ${text}\n`);
             
             this.emitLabel(uri, cid, filter.label_value);
+        } else {
+            console.log(`[LLM REJECTED] Filter: ${filter.id} | Reason: ${result.reasoning} | Post: "${text.substring(0, 50)}..."`);
         }
       }
     });

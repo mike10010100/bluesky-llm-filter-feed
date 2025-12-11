@@ -32,3 +32,8 @@ Thumbs.db
 *~
 # Model cache for @xenova/transformers
 .cache/
+
+# SQLite database files
+labels.db
+labels.db-shm
+labels.db-wal
