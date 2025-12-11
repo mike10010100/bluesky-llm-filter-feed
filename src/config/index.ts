@@ -24,6 +24,7 @@ const ConfigSchema = z.object({
   service: z.object({
     handle: z.string(),
     did: z.string().optional(),
+    signingKey: z.string().optional(), // We'll warn if missing, but it's needed for real labeling
     provider: z.enum(['ollama', 'openai', 'anthropic']),
   }),
   llm: z.object({

@@ -1,4 +1,5 @@
 import { Jetstream } from "@skyware/jetstream";
+import { LabelerServer } from "@skyware/labeler";
 import { Config } from "../config";
 import { createLLMProvider, LLMProvider } from "../analysis/llm";
 import { PreFilter } from "../analysis/prefilter";
@@ -9,14 +10,18 @@ export class FirehoseProcessor {
   private jetstream: Jetstream;
   private llm: LLMProvider;
   private embeddingManager: EmbeddingManager;
+  private labelerServer?: LabelerServer;
 
-  constructor(config: Config) {
+  constructor(config: Config, labelerServer?: LabelerServer) {
     this.config = config;
     this.llm = createLLMProvider(config);
     this.embeddingManager = EmbeddingManager.getInstance();
     this.jetstream = new Jetstream({
       wantedCollections: ["app.bsky.feed.post"],
     });
+    if (labelerServer) {
+        this.labelerServer = labelerServer;
+    }
   }
 
   async start() {
@@ -82,8 +87,7 @@ export class FirehoseProcessor {
             console.log(`   URI: ${uri}`);
             console.log(`   Text: ${text}\n`);
             
-            // TODO: Emit AT Protocol Label
-            this.emitLabel(uri, filter.label_value);
+            this.emitLabel(uri, cid, filter.label_value);
         }
       }
     });
@@ -91,9 +95,14 @@ export class FirehoseProcessor {
     this.jetstream.start();
   }
 
-  private emitLabel(uri: string, value: string) {
-      // Placeholder for the actual Label emission logic
-      // In a real deployment, this would push a signed label to the subscribers
-      console.log(`[ACTION] Emitting label "${value}" for ${uri}`);
+  private emitLabel(uri: string, cid: string, value: string) {
+      if (this.labelerServer) {
+        // Emit real AT Protocol label
+        console.log(`[ACTION] Broadcasting Label: "${value}" for ${uri}`);
+        this.labelerServer.createLabel({ uri, val: value, cid });
+      } else {
+        // Dry run mode
+        console.log(`[DRY-RUN] Would have emitted label "${value}" for ${uri}`);
+      }
   }
 }
