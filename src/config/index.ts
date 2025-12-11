@@ -38,8 +38,20 @@ export type Config = z.infer<typeof ConfigSchema>;
 export type FilterConfig = z.infer<typeof FilterSchema>;
 
 export function loadConfig(configPath: string = 'config.yaml'): Config {
+  let finalConfigPath = configPath;
+  if (!fs.existsSync(path.resolve(configPath))) {
+    const samplePath = path.resolve('config.sample.yaml');
+    if (fs.existsSync(samplePath)) {
+      console.warn(`Configuration file not found at ${configPath}. Using ${samplePath} as a fallback.`);
+      finalConfigPath = samplePath;
+    } else {
+      console.error(`Neither ${configPath} nor ${samplePath} found. Please create a config file.`);
+      process.exit(1);
+    }
+  }
+
   try {
-    const fileContents = fs.readFileSync(path.resolve(configPath), 'utf8');
+    const fileContents = fs.readFileSync(path.resolve(finalConfigPath), 'utf8');
     const parsed = yaml.parse(fileContents);
     return ConfigSchema.parse(parsed);
   } catch (error) {
