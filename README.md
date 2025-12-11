@@ -10,6 +10,7 @@ Unlike simple keyword blockers, SkyFilter understands context. It can tell the d
 *   **Cost Efficient:** Uses a 2-stage "Funnel" (Keywords/Embeddings -> LLM) to save money/compute.
 *   **Privacy First:** Run it locally with Ollama. No data leaves your machine.
 *   **Multimodal:** Can analyze images (requires a Vision model like `llava` or `gpt-4o`).
+*   **Robust & Performant:** Includes load shedding, concurrent processing, and configurable pre-filters.
 
 ## Quick Start
 
@@ -22,26 +23,62 @@ npm install
 npm run build
 ```
 
-### 2. Configuration
+### 2. Labeler Setup
 
-Edit `config.yaml` to define your filters.
+You need a dedicated Bluesky account to act as the labeler service.
+
+```bash
+npx @skyware/labeler setup
+```
+Follow the prompts to get your **DID** and **Signing Key**.
+
+Then, define your labels:
+```bash
+npx @skyware/labeler label add --name "content:politics" --description "Contains political content"
+```
+
+### 3. Configuration
+
+Copy and edit the config file:
+
+```bash
+cp config.sample.yaml config.yaml
+```
+
+Example `config.yaml`:
 
 ```yaml
 service:
-  provider: "ollama" # or "openai"
+  handle: "my-labeler.bsky.social"
+  did: "did:plc:..."
+  signingKey: "..."
+  provider: "ollama"
 
 llm:
-  model: "llama3" # Make sure you have this pulled in Ollama
+  model: "qwen3-vl" # Supports vision
+  base_url: "http://127.0.0.1:11434"
+
+performance:
+  queue_limit: 50
+  concurrency: 3
 
 filters:
-  - id: "no-soccer"
-    label_value: "content:soccer"
-    trigger_words: ["soccer", "football", "fifa"]
-    prompt: "Is this post discussing the sport of Association Football? Answer YES or NO."
-    look_at_images: true
+  - id: "politics"
+    label_value: "content:politics"
+    description: "Political content"
+    match_mode: "any" # 'keyword', 'embedding', 'any', 'all'
+    trigger_words: ["election", "vote"]
+    embeddings:
+      enabled: true
+      threshold: 0.35
+      triggers: ["discussion about elections"]
+    llm:
+      prompt: "Is this politics? Answer YES or NO."
+      look_at_images: true
+      confidence_threshold: 0.8
 ```
 
-### 3. Run It
+### 4. Run It
 
 ```bash
 npm start
@@ -50,12 +87,12 @@ npm start
 ## Architecture
 
 1.  **Ingestion:** Listens to the Bluesky "Jetstream" (Firehose).
-2.  **Pre-Filter:** Checks posts against `trigger_words` to find candidates.
-3.  **Analysis:** Sends candidates to the configured LLM Provider.
-4.  **Action:** Logs the detection (Label emission coming in v2).
+2.  **Pre-Filter (The Sieve):** Checks posts against Keywords and/or Vector Embeddings to find candidates.
+3.  **Analysis (The Judge):** Sends candidates to the configured LLM Provider.
+4.  **Action:** Emits an AT Protocol Label if the LLM confirms.
 
 ## Advanced: Using OpenAI
 
 1.  Set `service.provider` to `openai`.
-2.  Set `llm.model` to `gpt-4o-mini`.
+2.  Set `llm.model` to `gpt-4o-mini` (or `gpt-4o` for vision).
 3.  Set `llm.api_key` in your config (or use env var).

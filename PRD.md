@@ -21,56 +21,77 @@ A modular, configurable Node.js application that users can run (locally, on a VP
 
 ### 4.1. Configurable Filters
 Users define "Rules". Each rule has:
-*   **Label Name:** `soccer-hate`
+*   **Label Name:** `content:soccer`
 *   **Description:** "Hides all positive references to Soccer/Football."
-*   **Detection Strategy:**
-    *   *Keywords:* (Fastest) "goal", "offside".
-    *   *Embeddings:* (Smarter) Vector similarity to "professional soccer match" concept.
-    *   *LLM Prompt:* (Most Accurate) "Is this post discussing Association Football?"
-*   **Multimodal:** Option to send attached images to Vision models (GPT-4o / LlaVa).
+*   **Detection Strategy (Hybrid Sieve):**
+    *   *Keywords:* Fast Regex match (with word boundaries).
+    *   *Embeddings:* Vector similarity match (`all-MiniLM-L6-v2`) with configurable thresholds.
+    *   *Match Mode:* Configurable logic (`any`, `all`, `keyword`, `embedding`) to combine the above.
+*   **LLM Verification:**
+    *   *Prompt:* User-defined system prompt.
+    *   *Multimodal:* Option to send attached images to Vision models.
+    *   *Confidence:* Configurable threshold for the LLM's certainty.
 
-### 4.2. The "Funnel" Architecture (Cost/Speed Optimization)
+### 4.2. The "Funnel" Architecture
 1.  **Ingestion:** Jetstream (Firehose).
 2.  **Layer 1: Fast Match (The Sieve):**
-    *   Checks Regex/Keywords.
-    *   *Optional:* Checks Vector Embeddings (Local `all-MiniLM` via Transformers.js or Ollama).
+    *   Checks Regex/Keywords and/or Embeddings.
     *   *Goal:* Eliminate 99% of irrelevant posts instantly.
-3.  **Layer 2: Intelligence (The Judge):**
-    *   If Layer 1 is triggered, send context (Post Text + Image URLs) to the LLM Provider.
-    *   LLM Providers: **Ollama** (Local), **OpenAI** (Cloud), **Anthropic**.
-4.  **Layer 3: Action:**
-    *   If LLM confirms, sign and emit the Label via AT Protocol.
-
-### 4.3. Image Support
-*   If a post has images and triggers Layer 1 (or the user forces "Scan All Images"), the image is fetched.
-*   Sent to a Vision-capable model (gpt-4o, llava, moondream).
+3.  **Queueing:**
+    *   Matched posts are pushed to a **Bounded Queue** with configurable concurrency.
+    *   **Load Shedding:** If the queue is full, posts are dropped to protect the LLM server.
+4.  **Layer 2: Intelligence (The Judge):**
+    *   Queue workers send context (Post Text + Image URLs) to the LLM Provider.
+    *   LLM Providers: **Ollama** (Local), **OpenAI** (Cloud).
+    *   Response: Structured JSON `{ decision: "YES", confidence: 0.9 }`.
+5.  **Layer 3: Action:**
+    *   If LLM confirms, the **LabelerServer** emits a signed AT Protocol Label.
 
 ## 5. Technical Architecture
 *   **Core:** TypeScript (Node.js).
-*   **Protocol:** `@atproto/api`, `@skyware/jetstream`.
+*   **Protocol:** `@atproto/api`, `@skyware/jetstream`, `@skyware/labeler`.
 *   **AI Abstraction Layer:**
-    *   `LLMProvider` interface (generateText, generateVision).
-    *   `EmbeddingProvider` interface (generateVector).
-*   **Storage:**
-    *   SQLite (storing cursor, cache of post CIDs to avoid re-processing, and potentially user subscriptions if we go multi-tenant later).
+    *   `LLMProvider`: Handles Ollama/OpenAI interactions, JSON parsing, and image download/encoding.
+    *   `EmbeddingProvider`: Handles local vector generation via `@xenova/transformers`.
+*   **Infrastructure:**
+    *   `BoundedQueue`: Manages concurrency and backpressure.
+    *   SQLite (`labels.db`): Managed by `@skyware/labeler` to store label history and sequence state.
 
 ## 6. Configuration Example (`config.yaml`)
 ```yaml
 service:
   handle: "my-filter.bsky.social"
-  provider: "ollama" # or 'openai'
+  did: "did:plc:..."
+  signingKey: "..."
+  provider: "ollama"
+
+llm:
+  model: "qwen3-vl"
+  base_url: "http://127.0.0.1:11434"
+
+performance:
+  queue_limit: 50
+  concurrency: 3
 
 filters:
   - id: "soccer"
-    label: "content:soccer"
-    description: "Matches soccer content"
-    trigger_words: ["soccer", "football", "messi", "fifa"]
-    prompt: "Is this text about the sport of soccer? Answer YES/NO."
-    look_at_images: true
+    label_value: "content:soccer"
+    match_mode: "any"
+    trigger_words: ["soccer", "football"]
+    embeddings:
+      enabled: true
+      threshold: 0.35
+      triggers: ["Professional football match"]
+    llm:
+      prompt: "Is this soccer? Answer YES or NO."
+      look_at_images: true
+      confidence_threshold: 0.8
 ```
 
-## 7. Roadmap
-*   **Phase 1:** Core Engine. Hardcoded "Soccer" rule. Jetstream -> Keyword -> OpenAI.
-*   **Phase 2:** Abstraction. Add Ollama support. Move rules to `config.yaml`.
-*   **Phase 3:** Vision. Add image fetching and LlaVa support.
-*   **Phase 4:** Embeddings. Add vector pre-filtering to reduce false negatives.
+## 7. Project Status
+*   **Phase 1 (Core Engine):** ✅ Complete. Jetstream -> Keyword -> LLM.
+*   **Phase 2 (Configurable):** ✅ Complete. `config.yaml` drives all logic.
+*   **Phase 3 (Vision):** ✅ Complete. Support for multimodal models (Qwen3-VL, GPT-4o).
+*   **Phase 4 (Embeddings):** ✅ Complete. `all-MiniLM-L6-v2` integration.
+*   **Phase 5 (Performance):** ✅ Complete. Queue system and load shedding.
+*   **Phase 6 (AT Protocol):** ✅ Complete. Full Labeler Server integration.
