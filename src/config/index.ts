@@ -36,6 +36,10 @@ const ConfigSchema = z.object({
     base_url: z.string().optional(),
     api_key: z.string().optional(), // For OpenAI/Anthropic
   }),
+  performance: z.object({
+    queue_limit: z.number().min(1).default(50),
+    concurrency: z.number().min(1).default(3),
+  }).default({}),
   filters: z.array(FilterSchema),
 });
 

@@ -53,7 +53,7 @@ export class OllamaProvider implements LLMProvider {
       const content = response.message.content.trim();
       console.log(`[Ollama] Raw response: ${content}`);
 
-      let parsedResponse: { decision: string, confidence: number };
+      let parsedResponse: { decision?: string, confidence?: number };
       
       try {
           parsedResponse = JSON.parse(content);
@@ -63,7 +63,8 @@ export class OllamaProvider implements LLMProvider {
           return { isMatch, confidence: 0, reasoning: content };
       }
 
-      const isMatch = parsedResponse.decision.toUpperCase() === 'YES';
+      const decision = parsedResponse.decision ? parsedResponse.decision.toUpperCase() : 'NO';
+      const isMatch = decision === 'YES';
       const confidence = Math.max(0, Math.min(1, parsedResponse.confidence || 0));
 
       return {

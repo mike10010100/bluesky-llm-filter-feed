@@ -4,6 +4,7 @@ import { Config } from "../config";
 import { createLLMProvider, LLMProvider } from "../analysis/llm";
 import { PreFilter } from "../analysis/prefilter";
 import { EmbeddingManager } from "../analysis/embedding";
+import { BoundedQueue } from "../utils/queue";
 
 export class FirehoseProcessor {
   private config: Config;
@@ -11,11 +12,19 @@ export class FirehoseProcessor {
   private llm: LLMProvider;
   private embeddingManager: EmbeddingManager;
   private labelerServer?: LabelerServer;
+  private queue: BoundedQueue;
 
   constructor(config: Config, labelerServer?: LabelerServer) {
     this.config = config;
     this.llm = createLLMProvider(config);
     this.embeddingManager = EmbeddingManager.getInstance();
+    
+    // Initialize Queue from Config
+    const queueLimit = config.performance?.queue_limit || 50;
+    const concurrency = config.performance?.concurrency || 3;
+    console.log(`Initializing Queue: Limit=${queueLimit}, Concurrency=${concurrency}`);
+    this.queue = new BoundedQueue(queueLimit, concurrency); 
+    
     this.jetstream = new Jetstream({
       wantedCollections: ["app.bsky.feed.post"],
     });
@@ -49,9 +58,6 @@ export class FirehoseProcessor {
         }
 
         // 2. Evaluate Embeddings
-        // Run if:
-        // - Mode is 'embedding' OR 'all' (Always run)
-        // - Mode is 'any' AND (keyword didn't match OR force_check is on)
         const shouldRunEmbedding = 
             (filter.match_mode === 'embedding' || filter.match_mode === 'all') ||
             (filter.match_mode === 'any' && filter.embeddings?.enabled && (!keywordMatch || filter.embeddings.force_check));
@@ -97,39 +103,44 @@ export class FirehoseProcessor {
 
         console.log(`[PRE-FILTER MATCH] Filter: ${filter.id} | Reason: ${triggerReason} | Post: "${text.substring(0, 50)}"...`);
 
-        // 2. Stage 2: LLM Verification (Slow/Costly)
-        // Check for images if needed
-        const imageUrls: string[] = [];
-        if (filter.llm.look_at_images && post.embed && post.embed.$type === 'app.bsky.embed.images') {
-             // @ts-ignore
-             post.embed.images.forEach((img: any) => {
-                 if (img.image && img.image.ref && img.image.ref.$link) {
-                     const link = img.image.ref.$link;
-                     // Construct public CDN URL (Note: this is for public data)
-                     const url = `https://cdn.bsky.app/img/feed_fullsize/plain/${event.did}/${link}@jpeg`;
-                     imageUrls.push(url);
-                 }
-             });
-        }
-
-        const result = await this.llm.analyzePost(text, filter.llm.prompt, imageUrls);
-
-        if (result.isMatch) {
-            // Check confidence threshold
-            if (result.confidence !== undefined && result.confidence < filter.llm.confidence_threshold) {
-                console.log(`[LLM LOW CONFIDENCE] Filter: ${filter.id} | Score: ${result.confidence.toFixed(2)} < ${filter.llm.confidence_threshold} | Reason: ${result.reasoning}`);
-            } else {
-                console.log(`
-🚨 [LABEL MATCH] 🚨`);
-                console.log(`   Filter: ${filter.id}`);
-                console.log(`   Reason: ${result.reasoning}`);
-                console.log(`   URI: ${uri}`);
-                console.log(`   Text: ${text}\n`);
-                
-                this.emitLabel(uri, cid, filter.label_value);
+        // 4. Stage 2: LLM Verification (Queued)
+        const task = async () => {
+            // Check for images if needed (inside the task)
+            const imageUrls: string[] = [];
+            if (filter.llm.look_at_images && post.embed && post.embed.$type === 'app.bsky.embed.images') {
+                // @ts-ignore
+                post.embed.images.forEach((img: any) => {
+                    if (img.image && img.image.ref && img.image.ref.$link) {
+                        const link = img.image.ref.$link;
+                        const url = `https://cdn.bsky.app/img/feed_fullsize/plain/${event.did}/${link}@jpeg`;
+                        imageUrls.push(url);
+                    }
+                });
             }
-        } else {
-            console.log(`[LLM REJECTED] Filter: ${filter.id} | Reason: ${result.reasoning} | Post: "${text.substring(0, 50)}..."`);
+
+            const result = await this.llm.analyzePost(text, filter.llm.prompt, imageUrls);
+
+            if (result.isMatch) {
+                if (result.confidence !== undefined && result.confidence < filter.llm.confidence_threshold) {
+                    console.log(`[LLM LOW CONFIDENCE] Filter: ${filter.id} | Score: ${result.confidence.toFixed(2)} < ${filter.llm.confidence_threshold} | Reason: ${result.reasoning}`);
+                } else {
+                    console.log(`
+🚨 [LABEL MATCH] 🚨`);
+                    console.log(`   Filter: ${filter.id}`);
+                    console.log(`   Reason: ${result.reasoning}`);
+                    console.log(`   URI: ${uri}`);
+                    console.log(`   Text: ${text}\n`);
+                    
+                    this.emitLabel(uri, cid, filter.label_value);
+                }
+            } else {
+                console.log(`[LLM REJECTED] Filter: ${filter.id} | Reason: ${result.reasoning} | Post: "${text.substring(0, 50)}"...`);
+            }
+        };
+
+        const added = this.queue.add(task);
+        if (!added) {
+            console.warn(`[LOAD SHEDDING] Dropping post due to full queue (${this.queue.size} pending). Filter: ${filter.id}`);
         }
       }
     });
