@@ -23,12 +23,24 @@ export class OllamaProvider implements LLMProvider {
 
   async analyzePost(text: string, systemPrompt: string, imageUrls: string[] = []): Promise<LLMResult> {
     try {
-      // Basic text-only implementation for Phase 1
-      // For multimodal, we would add 'images' field to the message
-      const messages = [
+      const messages: any[] = [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `Post Content:\n"${text}"\n\nIs this post a match?` }
       ];
+
+      // If there are images, we need to download them and convert to base64 for Ollama
+      if (imageUrls.length > 0) {
+          const imagesBase64: string[] = [];
+          for (const url of imageUrls) {
+              const b64 = await this.downloadImageAsBase64(url);
+              if (b64) imagesBase64.push(b64);
+          }
+          
+          if (imagesBase64.length > 0) {
+              // Append images to the user message
+              messages[1].images = imagesBase64;
+          }
+      }
 
       const response = await this.client.chat({
         model: this.model,
@@ -47,6 +59,16 @@ export class OllamaProvider implements LLMProvider {
       console.error('Ollama analysis failed:', error);
       return { isMatch: false }; // Fail open (don't label if unsure)
     }
+  }
+
+  private async downloadImageAsBase64(url: string): Promise<string | null> {
+      try {
+          const response = await axios.get(url, { responseType: 'arraybuffer' });
+          return Buffer.from(response.data, 'binary').toString('base64');
+      } catch (err) {
+          console.error(`Failed to download image for analysis: ${url}`, err);
+          return null;
+      }
   }
 }
 

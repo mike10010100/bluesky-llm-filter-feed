@@ -4,8 +4,9 @@ service:
   provider: "ollama" # 'ollama' or 'openai' or 'anthropic'
   
 llm:
-  model: "llama3" # Model name (e.g., 'llama3', 'gpt-4o-mini')
-  base_url: "http://localhost:11434" # For Ollama
+  model: "phi3" # Text-only efficient model
+  # model: "qwen3-vl" # Uncomment for Multimodal (Vision) support
+  base_url: "http://192.168.86.172:11434"
 
 filters:
   - id: "soccer-filter"
