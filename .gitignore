@@ -1,0 +1,32 @@
+# Node.js
+node_modules/
+dist/
+build/
+.env
+.npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# TypeScript
+*.tsbuildinfo
+
+# Editor/IDE files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*~
+# Model cache for @xenova/transformers
+.cache/
