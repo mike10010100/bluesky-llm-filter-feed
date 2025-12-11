@@ -23,7 +23,7 @@ export class OllamaProvider implements LLMProvider {
 
   async analyzePost(text: string, systemPrompt: string, imageUrls: string[] = []): Promise<LLMResult> {
     try {
-      console.log(`[Ollama] Sending request for text: "${text.substring(0, 20)}..."`);
+      // console.log(`[Ollama] Sending request for text: "${text.substring(0, 20)}"...`);
       const messages: any[] = [
         { role: 'system', content: systemPrompt + " Your response must be a JSON object with a 'decision' field ('YES' or 'NO') and a 'confidence' field (a number between 0.0 and 1.0)." },
         { role: 'user', content: `Post Content:\n"${text}"\n\nIs this post a match?` }
@@ -51,7 +51,7 @@ export class OllamaProvider implements LLMProvider {
       });
 
       const content = response.message.content.trim();
-      console.log(`[Ollama] Raw response: ${content}`);
+      // console.log(`[Ollama] Raw response: ${content}`);
 
       let parsedResponse: { decision?: string, confidence?: number };
       
@@ -72,8 +72,8 @@ export class OllamaProvider implements LLMProvider {
         confidence,
         reasoning: JSON.stringify(parsedResponse)
       };
-    } catch (error) {
-      console.error('[Ollama] Analysis fatal error:', error);
+    } catch (error: any) {
+      console.error('[Ollama] Analysis fatal error:', error.message || error);
       return { isMatch: false, confidence: 0 }; 
     }
   }
@@ -153,8 +153,15 @@ export class OpenAIProvider implements LLMProvider {
 
       return { isMatch, confidence, reasoning: JSON.stringify(parsedResponse) };
 
-    } catch (error) {
-      console.error('OpenAI analysis failed:', error);
+    } catch (error: any) {
+      console.error('\n\n========== OPENAI API ERROR START ==========');
+      if (error.response) {
+          console.error(`Status: ${error.response.status}`);
+          console.error(`Data: ${JSON.stringify(error.response.data, null, 2)}`);
+      } else {
+          console.error('Error Message:', error.message);
+      }
+      console.error('========== OPENAI API ERROR END ============\n\n');
       return { isMatch: false, confidence: 0 };
     }
   }
@@ -166,10 +173,11 @@ export function createLLMProvider(config: Config): LLMProvider {
   if (providerType === 'ollama') {
     return new OllamaProvider(config.llm.base_url || 'http://localhost:11434', config.llm.model);
   } else if (providerType === 'openai') {
-    if (!config.llm.api_key) {
-      throw new Error("OpenAI API key is required in config.llm.api_key");
+    const apiKey = config.llm.api_key || process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error("OpenAI API key is required (config.llm.api_key or OPENAI_API_KEY env var)");
     }
-    return new OpenAIProvider(config.llm.api_key, config.llm.model, config.llm.base_url);
+    return new OpenAIProvider(apiKey, config.llm.model, config.llm.base_url);
   } else {
     throw new Error(`Unsupported provider: ${providerType}`);
   }
