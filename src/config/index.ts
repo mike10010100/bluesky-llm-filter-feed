@@ -16,9 +16,11 @@ const FilterSchema = z.object({
     threshold: z.number().min(0).max(1).default(0.5),
     triggers: z.array(z.string()).default([]),
   }).optional(),
-  prompt: z.string(), // The LLM System Prompt
-  look_at_images: z.boolean().default(false),
-  confidence_threshold: z.number().min(0).max(1).default(0.8),
+  llm: z.object({
+    prompt: z.string(), // The LLM System Prompt
+    look_at_images: z.boolean().default(false),
+    confidence_threshold: z.number().min(0).max(1).default(0.8),
+  }),
 });
 
 // Define the Main Config Schema

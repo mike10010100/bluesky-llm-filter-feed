@@ -100,7 +100,7 @@ export class FirehoseProcessor {
         // 2. Stage 2: LLM Verification (Slow/Costly)
         // Check for images if needed
         const imageUrls: string[] = [];
-        if (post.embed && post.embed.$type === 'app.bsky.embed.images') {
+        if (filter.llm.look_at_images && post.embed && post.embed.$type === 'app.bsky.embed.images') {
              // @ts-ignore
              post.embed.images.forEach((img: any) => {
                  if (img.image && img.image.ref && img.image.ref.$link) {
@@ -112,17 +112,22 @@ export class FirehoseProcessor {
              });
         }
 
-        const result = await this.llm.analyzePost(text, filter.prompt, imageUrls);
+        const result = await this.llm.analyzePost(text, filter.llm.prompt, imageUrls);
 
         if (result.isMatch) {
-            console.log(`
+            // Check confidence threshold
+            if (result.confidence !== undefined && result.confidence < filter.llm.confidence_threshold) {
+                console.log(`[LLM LOW CONFIDENCE] Filter: ${filter.id} | Score: ${result.confidence.toFixed(2)} < ${filter.llm.confidence_threshold} | Reason: ${result.reasoning}`);
+            } else {
+                console.log(`
 🚨 [LABEL MATCH] 🚨`);
-            console.log(`   Filter: ${filter.id}`);
-            console.log(`   Reason: ${result.reasoning}`);
-            console.log(`   URI: ${uri}`);
-            console.log(`   Text: ${text}\n`);
-            
-            this.emitLabel(uri, cid, filter.label_value);
+                console.log(`   Filter: ${filter.id}`);
+                console.log(`   Reason: ${result.reasoning}`);
+                console.log(`   URI: ${uri}`);
+                console.log(`   Text: ${text}\n`);
+                
+                this.emitLabel(uri, cid, filter.label_value);
+            }
         } else {
             console.log(`[LLM REJECTED] Filter: ${filter.id} | Reason: ${result.reasoning} | Post: "${text.substring(0, 50)}..."`);
         }

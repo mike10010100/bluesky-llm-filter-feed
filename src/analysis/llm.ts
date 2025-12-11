@@ -23,8 +23,9 @@ export class OllamaProvider implements LLMProvider {
 
   async analyzePost(text: string, systemPrompt: string, imageUrls: string[] = []): Promise<LLMResult> {
     try {
+      console.log(`[Ollama] Sending request for text: "${text.substring(0, 20)}..."`);
       const messages: any[] = [
-        { role: 'system', content: systemPrompt },
+        { role: 'system', content: systemPrompt + " Your response must be a JSON object with a 'decision' field ('YES' or 'NO') and a 'confidence' field (a number between 0.0 and 1.0)." },
         { role: 'user', content: `Post Content:\n"${text}"\n\nIs this post a match?` }
       ];
 
@@ -46,18 +47,33 @@ export class OllamaProvider implements LLMProvider {
         model: this.model,
         messages: messages,
         stream: false,
+        format: "json"
       });
 
-      const content = response.message.content.trim().toUpperCase();
-      const isMatch = content.includes('YES');
+      const content = response.message.content.trim();
+      console.log(`[Ollama] Raw response: ${content}`);
+
+      let parsedResponse: { decision: string, confidence: number };
+      
+      try {
+          parsedResponse = JSON.parse(content);
+      } catch (jsonError) {
+          console.warn(`[Ollama] JSON Parse Error. Raw: "${content}"`);
+          const isMatch = content.toUpperCase().includes('YES');
+          return { isMatch, confidence: 0, reasoning: content };
+      }
+
+      const isMatch = parsedResponse.decision.toUpperCase() === 'YES';
+      const confidence = Math.max(0, Math.min(1, parsedResponse.confidence || 0));
 
       return {
         isMatch,
-        reasoning: content
+        confidence,
+        reasoning: JSON.stringify(parsedResponse)
       };
     } catch (error) {
-      console.error('Ollama analysis failed:', error);
-      return { isMatch: false }; // Fail open (don't label if unsure)
+      console.error('[Ollama] Analysis fatal error:', error);
+      return { isMatch: false, confidence: 0 }; 
     }
   }
 
@@ -85,15 +101,32 @@ export class OpenAIProvider implements LLMProvider {
 
   async analyzePost(text: string, systemPrompt: string, imageUrls: string[] = []): Promise<LLMResult> {
     try {
+      const messages: any[] = [
+        { role: "system", content: systemPrompt + " Your response must be a JSON object with a 'decision' field ('YES' or 'NO') and a 'confidence' field (a number between 0.0 and 1.0)." },
+        { role: "user", content: `Post Content:\n"${text}"\n\nIs this post a match?` }
+      ];
+
+      // Handle images for OpenAI Vision
+      if (imageUrls.length > 0) {
+          const imageContent = imageUrls.map(url => ({
+              type: "image_url",
+              image_url: { url }
+          }));
+          
+          // OpenAI expects an array of content parts for multimodal input
+          messages[1].content = [
+              { type: "text", text: messages[1].content },
+              ...imageContent
+          ];
+      }
+
       const response = await axios.post(
         `${this.baseURL}/chat/completions`,
         {
           model: this.model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: `Post Content:\n"${text}"\n\nIs this post a match?` }
-          ],
+          messages: messages,
           temperature: 0,
+          response_format: { type: "json_object" }
         },
         {
           headers: {
@@ -103,14 +136,25 @@ export class OpenAIProvider implements LLMProvider {
         }
       );
 
-      const content = response.data.choices[0].message.content.trim().toUpperCase();
-      const isMatch = content.includes('YES');
+      const content = response.data.choices[0].message.content.trim();
+      let parsedResponse: { decision: string, confidence: number };
+      
+      try {
+          parsedResponse = JSON.parse(content);
+      } catch (jsonError) {
+          console.warn('OpenAI: Could not parse JSON response. Falling back to text check.', content);
+          const isMatch = content.toUpperCase().includes('YES');
+          return { isMatch, confidence: 0, reasoning: content };
+      }
 
-      return { isMatch, reasoning: content };
+      const isMatch = parsedResponse.decision.toUpperCase() === 'YES';
+      const confidence = Math.max(0, Math.min(1, parsedResponse.confidence || 0));
+
+      return { isMatch, confidence, reasoning: JSON.stringify(parsedResponse) };
 
     } catch (error) {
       console.error('OpenAI analysis failed:', error);
-      return { isMatch: false };
+      return { isMatch: false, confidence: 0 };
     }
   }
 }
