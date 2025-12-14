@@ -121,14 +121,26 @@ export class OpenAIProvider implements LLMProvider {
           ];
       }
 
+      // Build request payload dynamically based on model type
+      const requestPayload: any = {
+        model: this.model,
+        messages: messages,
+        response_format: { type: "json_object" }
+      };
+
+      // GPT-5 and o1 models (Reasoning models) often do not support 'temperature' (must be default/1)
+      // or use 'max_completion_tokens' instead of 'max_tokens'.
+      if (this.model.includes('gpt-5') || this.model.includes('o1')) {
+          // Do NOT set temperature for reasoning models (it causes 400 Bad Request)
+          // requestPayload.max_completion_tokens = 1024; // Optional: Enforce limit
+      } else {
+          // Standard models support temperature
+          requestPayload.temperature = 0;
+      }
+
       const response = await axios.post(
         `${this.baseURL}/chat/completions`,
-        {
-          model: this.model,
-          messages: messages,
-          temperature: 0,
-          response_format: { type: "json_object" }
-        },
+        requestPayload,
         {
           headers: {
             'Authorization': `Bearer ${this.apiKey}`,
