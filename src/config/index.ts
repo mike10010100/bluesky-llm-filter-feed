@@ -39,7 +39,7 @@ const ConfigSchema = z.object({
   performance: z.object({
     queue_limit: z.number().min(1).default(50),
     concurrency: z.number().min(1).default(3),
-  }).default({}),
+  }).default({ queue_limit: 50, concurrency: 3 }),
   filters: z.array(FilterSchema),
 });
 
